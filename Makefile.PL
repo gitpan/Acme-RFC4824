@@ -12,6 +12,7 @@ WriteMakefile(
         'Test::More' => 0,
         'Moose'      => '0.18',
     },
+    LICENSE             => 'perl',
     dist                => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean               => { FILES => 'Acme-RFC4824-*' },
 );

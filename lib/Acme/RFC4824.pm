@@ -7,7 +7,7 @@ use Moose;
 use Carp;
 use bytes;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 # a hash ref of mappings from ASCII to ASCII art representations
 has 'ascii2art_map'     => (
@@ -139,8 +139,8 @@ XEOF
 / \
 XEOF
     $self->{'ascii2art_map'}->{'V'} = << 'XEOF';
-\0__
- | 
+|0 
+ |\
 / \
 XEOF
     $self->{'ascii2art_map'}->{'W'} = << 'XEOF';
@@ -154,8 +154,8 @@ XEOF
 / \
 XEOF
     $self->{'ascii2art_map'}->{'Y'} = << 'XEOF';
- 0__
-/| 
+\0__
+ | 
 / \
 XEOF
     $self->{'ascii2art_map'}->{'Z'} = << 'XEOF';
@@ -185,17 +185,33 @@ sub decode {
         $frame = $1 . $2;
     }
     $frame =~ s/[U-Y]//g; # ignore ACK, KAL, NAK, RTR and RTT signals
-    if (! ($frame =~ s{\A Q[A-E][A-B][A-P]{2} ([A-P]+) [A-P]{4}R \z}{$1}xms)) {
-        # strip FST, format, CksumTyp, Frame No, CRC and FEN
-        # TODO - check checksum based on CksumTyp
+    my ($header, $payload, $checksum) =
+        ($frame =~ m{\A Q([A-E][A-B][A-P]{2}) ([A-P]+) ([A-P]{4})R \z}xms);
+    if (! defined $header || ! defined $payload || ! defined $checksum) {
         croak "Invalid frame format.";
     }
-    $frame =~ s{\A }{}xms;
+    return $self->__pack($payload);
+}
+
+sub __pack {
+    my $self  = shift;
+    my $frame = shift;
+
     # convert from ASCII to hex
     $frame =~ tr/A-J/0-9/;
     $frame =~ tr/K-P/a-f/;
-    my $packet = pack('H*', $frame);
-    return $packet;
+    return pack('H*', $frame);
+}
+
+sub __unpack {
+    my $self = shift;
+    my $data = shift;
+
+    # unpack
+    my $result = unpack('H*', $data);
+    $result =~ tr/0-9/A-J/;
+    $result =~ tr/a-f/K-P/;
+    return $result;
 }
 
 sub encode {
@@ -246,11 +262,11 @@ sub encode {
         croak "GZIP support not implemented (yet).";
     }
 
-    my $packet_hex = unpack('H*', $packet);
-    if (substr($packet_hex, 0, 1) eq '4') { # IPv4
+    my $packet_ascii = $self->__unpack($packet);
+    if (substr($packet_ascii, 0, 1) eq 'E') { # E=4: IPv4
         $sfs_frame .= 'B';
     }
-    elsif (substr($packet_hex, 0, 1) eq '4') { # IPv6
+    elsif (substr($packet_ascii, 0, 1) eq 'G') { # G=6: IPv6
         $sfs_frame .= 'C';
     }
     else {
@@ -260,14 +276,9 @@ sub encode {
     $sfs_frame .= 'A';    # Checksum Type: none
     $sfs_frame .= 'AA';   # Frame number 0x00
 
-    # convert hex to SFS ASCII
-    my $packet_ascii = $packet_hex;
-    $packet_ascii =~ tr/0-9/A-J/;
-    $packet_ascii =~ tr/a-f/K-P/;
-
     $sfs_frame .= $packet_ascii;
 
-    $sfs_frame .= 'PPPP'; # Preset checksum: 0xFFFF
+    $sfs_frame .= 'AAAA'; # No checksum, so we just set it zeros 
     $sfs_frame .= 'R';    # Frame End, FEN
 
     if ($type eq 'ASCII') {
